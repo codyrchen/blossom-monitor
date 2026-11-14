@@ -49,6 +49,16 @@ def test_flags_wrong_state_licensing_faq():
     assert len(rep.failures) == 1 and "New York" in rep.failures[0]
 
 
+def test_flags_wrong_city():
+    from monitor import check_city_text
+    pitt = "Blossom connects you with licensed psychiatric providers in Philadelphia who offer care."
+    phil = "Blossom connects you with licensed psychiatric providers in Philadelphia who offer care."
+    rep = Report()
+    check_city_text("/locations/pittsburgh", pitt, rep)   # should fail: page is Pittsburgh, text says Philadelphia
+    check_city_text("/locations/philadelphia", phil, rep)  # should pass
+    assert len(rep.failures) == 1 and "Pittsburgh" in rep.failures[0]
+
+
 def test_duplicate_insurance():
     rep = Report()
     check_insurance_options([("Aetna", "Aetna"), ("Aetna", "Aetna")], rep)

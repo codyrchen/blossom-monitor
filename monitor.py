@@ -159,6 +159,23 @@ def check_location_text(url: str, html: str, rep: Report) -> None:
             rep.fail(f"{url} says your {licensed}-licensed provider can see you only in {located}")
 
 
+PROVIDERS_IN = re.compile(r"providers in ([A-Z][A-Za-z.\- ]+?)(?: who| near|,|\.)")
+# City slugs whose display name isn't a plain title-case of the slug
+CITY_DISPLAY = {"new-york-city": "New York", "los-angeles": "Los Angeles",
+                "san-antonio": "San Antonio", "san-diego": "San Diego",
+                "san-francisco": "San Francisco"}
+
+
+def check_city_text(url: str, html: str, rep: Report) -> None:
+    """A city page should name its own city, not a different one (Pittsburgh said 'Philadelphia')."""
+    slug = url.rstrip("/").rsplit("/locations/", 1)[-1]
+    expected = CITY_DISPLAY.get(slug, slug.replace("-", " ").title())
+    named = {m.strip() for m in PROVIDERS_IN.findall(html)}
+    wrong = [n for n in named if n.lower() != expected.lower()]
+    if wrong:
+        rep.fail(f"{url} (page for {expected}) says providers are in {', '.join(wrong)}")
+
+
 def check_sitemap(rep: Report, workers: int = 8) -> list[str]:
     xml = get(f"{SITE}/sitemap.xml").text
     urls = re.findall(r"<loc>([^<]+)</loc>", xml)
@@ -175,6 +192,7 @@ def check_sitemap(rep: Report, workers: int = 8) -> list[str]:
             rep.warn(f"{url} has no canonical link")
         if "/locations/" in url:
             check_location_text(url, html, rep)
+            check_city_text(url, html, rep)
     rep.note(f"Sitemap: {len(urls)} pages checked")
     return urls
 

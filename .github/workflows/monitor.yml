@@ -1,9 +1,9 @@
 name: Blossom site monitor
 
 on:
-  schedule:
-    - cron: "17 13 * * *"   # daily, 7:17 AM Central
-  workflow_dispatch:
+  workflow_dispatch:   # manual only. Uncomment the schedule below once Blossom is OK with a daily run.
+  # schedule:
+  #   - cron: "17 13 * * *"   # daily, 7:17 AM Central
 
 jobs:
   check:
