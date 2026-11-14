@@ -1,0 +1,4 @@
+requests>=2.31
+pytest>=8
+# optional, only for --booking:
+# playwright>=1.45
