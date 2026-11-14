@@ -1,16 +1,4 @@
-"""Blossom Health site monitor.
-
-Catches the class of bug that sent Mississippi patients to Michigan: it reads the
-live state and insurance lists the booking widget ships with and checks them, then
-checks that every page in the sitemap loads and points to a canonical URL.
-
-Usage:
-    python monitor.py                 # core checks (fast, read-only, ~1 min)
-    python monitor.py --booking       # also open the booking flow per state (needs Playwright)
-    python monitor.py --json out.json # write results for CI
-
-Exit code is 1 when any check fails, so it can gate deploys or run on a schedule.
-"""
+"""Read-only checks for the Blossom Health site (dropdowns, sitemap, location page text)."""
 from __future__ import annotations
 
 import argparse
@@ -69,20 +57,29 @@ def get(url: str, **kw) -> requests.Response:
     raise RuntimeError("unreachable")
 
 
-# ---------------------------------------------------------------- widget options
-
 OPTION_LIST = re.compile(r"(stateOptions|insuranceOptions):\[(.*?)\]", re.S)
 OPTION = re.compile(r"label:[`\"']([^`\"']*)[`\"'],value:[`\"']([^`\"']*)[`\"']")
+# the per-state insurer map is minified (e.g. ys={CA:[...],PA:[...]}), so match on shape
+STATE_INSURERS = re.compile(r"\{((?:[A-Z]{2}:\[[^\]]*\],?){2,})\}")
+STATE_ENTRY = re.compile(r"([A-Z]{2}):\[([^\]]*)\]")
 
 
 def parse_option_lists(js: str) -> dict[str, list[tuple[str, str]]]:
-    """Return every non-empty stateOptions / insuranceOptions list found in a JS bundle."""
+    """First non-empty stateOptions / insuranceOptions list in a JS bundle."""
     found: dict[str, list[tuple[str, str]]] = {}
     for name, body in OPTION_LIST.findall(js):
         pairs = OPTION.findall(body)
         if pairs and name not in found:
             found[name] = pairs
     return found
+
+
+def parse_state_insurers(js: str) -> dict[str, list[tuple[str, str]]]:
+    """State code -> insurer options, from the bundle's per-state map."""
+    m = STATE_INSURERS.search(js)
+    if not m:
+        return {}
+    return {code: OPTION.findall(body) for code, body in STATE_ENTRY.findall(m.group(1))}
 
 
 def check_state_options(pairs: list[tuple[str, str]], rep: Report) -> None:
@@ -115,10 +112,24 @@ def check_insurance_options(pairs: list[tuple[str, str]], rep: Report) -> None:
     rep.note(f"Insurance dropdown: {', '.join(v for _, v in pairs)}")
 
 
-def check_widget(rep: Report) -> None:
+def check_state_insurers(by_state: dict[str, list[tuple[str, str]]], served: set[str],
+                         rep: Report) -> None:
+    for code, pairs in sorted(by_state.items()):
+        values = [v for _, v in pairs]
+        for v in sorted({x for x in values if values.count(x) > 1}):
+            names = [label for label, x in pairs if x == v]
+            rep.fail(f"{code} insurers {', '.join(names)} all send the same value {v!r}")
+        if code not in served:
+            rep.warn(f"{code} has its own insurer list but no /locations page")
+    if by_state:
+        rep.note(f"State insurer lists: {len(by_state)} states checked")
+
+
+def check_widget(rep: Report) -> dict[str, list[tuple[str, str]]]:
     html = get(f"{SITE}/start").text
     modules = sorted(set(re.findall(r"https://framerusercontent\.com/[^\"'\s)]+\.mjs", html)))
     lists: dict[str, list[tuple[str, str]]] = {}
+    by_state: dict[str, list[tuple[str, str]]] = {}
     for url in modules:
         try:
             js = get(url).text
@@ -127,15 +138,16 @@ def check_widget(rep: Report) -> None:
             continue
         for name, pairs in parse_option_lists(js).items():
             lists.setdefault(name, pairs)
+        if not by_state and "stateOptions" in js:
+            by_state = parse_state_insurers(js)
     if "stateOptions" not in lists:
         rep.fail("Could not find the booking widget's state list on /start (site structure changed?)")
     else:
         check_state_options(lists["stateOptions"], rep)
     if "insuranceOptions" in lists:
         check_insurance_options(lists["insuranceOptions"], rep)
+    return by_state
 
-
-# ---------------------------------------------------------------- pages
 
 LICENSE_FAQ = re.compile(
     r"your ([A-Z][A-Za-z ]+?)-licensed provider can only provide care when you(?:'|&#x27;|’)re "
@@ -153,19 +165,16 @@ def check_page(url: str) -> tuple[str, int, str | None, str]:
 
 
 def check_location_text(url: str, html: str, rep: Report) -> None:
-    """Location pages must tell patients the right state for licensing."""
     for licensed, located in set(LICENSE_FAQ.findall(html)):
         if licensed != located:
             rep.fail(f"{url} says your {licensed}-licensed provider can see you only in {located}")
 
 
 PROVIDERS_IN = re.compile(r"providers in (?:the )?([A-Z][A-Za-z\- ]+?)(?: who| near|,|\.| area)")
-# Periods in place names ("St. Louis", "D.C.") would end the match early, so drop them first.
+# drop periods in "St. Louis", "D.C." first or the match stops early
 ABBREV = re.compile(r"\b(St|Ft|Mt|D|C)\.")
 
-# City pages and the state each is in. A city page legitimately names its own city, its
-# state, or a common abbreviation of the city — so the allow-list is all three. It's only a
-# bug when the page names some OTHER place (Pittsburgh's page naming Philadelphia).
+# a city page can name its city, its state, or an alias. anything else is a bug
 CITY_STATE = {
     "philadelphia": "Pennsylvania", "pittsburgh": "Pennsylvania", "nashville": "Tennessee",
     "indianapolis": "Indiana", "boston": "Massachusetts", "denver": "Colorado",
@@ -185,12 +194,10 @@ def _place(name: str) -> str:
 
 
 STATE_SLUGS = {_place(name) for name in USPS} | {"washington dc"}
-# /locations/ pages that aren't about a place
 NOT_PLACES = {"online-psychiatrist"}
 
 
 def check_city_text(url: str, html: str, rep: Report) -> None:
-    """A city page should name its own city, state, or abbreviation, not a different place."""
     slug = url.rstrip("/").rsplit("/locations/", 1)[-1]
     city = _place(slug)
     if city in STATE_SLUGS or slug in NOT_PLACES:   # state pages: see check_location_text
@@ -199,7 +206,7 @@ def check_city_text(url: str, html: str, rep: Report) -> None:
     if slug in CITY_STATE:
         allowed.add(CITY_STATE[slug].lower())
     else:
-        # Unknown city: we don't know its state, so accept any state name and ask for an entry.
+        # don't know its state, so accept any state and ask for a table entry
         allowed |= STATE_SLUGS
         rep.warn(f"{url}: city not in CITY_STATE; add it so the check knows its state")
     named = {_place(n) for n in PROVIDERS_IN.findall(ABBREV.sub(r"\1", html))}
@@ -219,6 +226,7 @@ def check_sitemap(rep: Report, workers: int = 8) -> list[str]:
         results = list(pool.map(check_page, urls))
     for url, status, canon, html in results:
         if status != 200:
+            # on a request error, canon holds the error message
             rep.fail(f"{url} returned {status or canon}")
             continue
         if canon is None:
@@ -231,19 +239,13 @@ def check_sitemap(rep: Report, workers: int = 8) -> list[str]:
 
 
 def served_states(urls: list[str]) -> set[str]:
-    """States with a /locations/<state> page, i.e. where the site says Blossom practices."""
+    """States with a /locations/<state> page."""
     slugs = {u.rstrip("/").rsplit("/locations/", 1)[-1] for u in urls if "/locations/" in u}
     return {code for name, code in USPS.items() if name.lower().replace(" ", "-") in slugs}
 
 
-# ---------------------------------------------------------------- booking flow (optional)
-
 def check_booking(served: set[str], rep: Report, insurance: str = "Aetna") -> None:
-    """Open the booking flow for every state and record which step it lands on.
-
-    Each page load starts a session in Blossom's intake tool, so run this sparingly
-    (e.g. weekly, or before releases) and with Blossom's go-ahead.
-    """
+    """Open booking for every state. Each load starts an intake session, so ask Blossom first."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -267,8 +269,6 @@ def check_booking(served: set[str], rep: Report, insurance: str = "Aetna") -> No
         browser.close()
 
 
-# ---------------------------------------------------------------- main
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--booking", action="store_true", help="also test the booking flow per state")
@@ -276,8 +276,9 @@ def main() -> int:
     args = ap.parse_args()
 
     rep = Report()
+    by_state: dict[str, list[tuple[str, str]]] = {}
     try:
-        check_widget(rep)
+        by_state = check_widget(rep)
     except requests.RequestException as e:
         rep.fail(f"Could not load {SITE}/start: {e}")
     try:
@@ -287,6 +288,8 @@ def main() -> int:
         urls = []
     served = served_states(urls)
     rep.note(f"Served states (from /locations pages): {len(served)}: {', '.join(sorted(served))}")
+    # without the sitemap every state would look unserved, so skip the page warnings
+    check_state_insurers(by_state, served if urls else set(by_state), rep)
     if args.booking and served:
         check_booking(served, rep)
 
