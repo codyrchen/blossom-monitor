@@ -79,3 +79,24 @@ def test_duplicate_insurance():
     rep = Report()
     check_insurance_options([("Aetna", "Aetna"), ("Aetna", "Aetna")], rep)
     assert rep.failures
+
+
+def test_city_check_edge_cases():
+    from monitor import check_city_text
+    rep = Report()
+    check_city_text("/locations/tampa", "providers in St. Petersburg who offer care", rep)
+    check_city_text("/locations/pittsburgh", "providers in the Philadelphia area", rep)
+    assert len(rep.failures) == 2
+    assert "St Petersburg" in rep.failures[0] and "Philadelphia" in rep.failures[1]
+
+
+def test_city_check_covers_unlisted_cities():
+    from monitor import check_city_text
+    rep = Report()
+    check_city_text("/locations/st-louis", "providers in St. Louis who offer care", rep)
+    assert rep.failures == [] and len(rep.warnings) == 1   # own city passes, asks for a table entry
+    check_city_text("/locations/st-louis", "providers in Chicago who offer care", rep)
+    assert len(rep.failures) == 1 and "Chicago" in rep.failures[0]
+    rep = Report()
+    check_city_text("/locations/washington-dc", "providers in Washington D.C. who", rep)
+    assert rep.failures == [] and rep.warnings == []        # a state-level page, skipped

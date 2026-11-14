@@ -159,7 +159,9 @@ def check_location_text(url: str, html: str, rep: Report) -> None:
             rep.fail(f"{url} says your {licensed}-licensed provider can see you only in {located}")
 
 
-PROVIDERS_IN = re.compile(r"providers in ([A-Z][A-Za-z.\- ]+?)(?: who| near|,|\.| area)")
+PROVIDERS_IN = re.compile(r"providers in (?:the )?([A-Z][A-Za-z\- ]+?)(?: who| near|,|\.| area)")
+# Periods in place names ("St. Louis", "D.C.") would end the match early, so drop them first.
+ABBREV = re.compile(r"\b(St|Ft|Mt|D|C)\.")
 
 # City pages and the state each is in. A city page legitimately names its own city, its
 # state, or a common abbreviation of the city — so the allow-list is all three. It's only a
@@ -178,15 +180,28 @@ CITY_ALIASES = {
 }
 
 
+def _place(name: str) -> str:
+    return ABBREV.sub(r"\1", name).replace("-", " ").strip().lower()
+
+
+STATE_SLUGS = {_place(name) for name in USPS} | {"washington dc"}
+
+
 def check_city_text(url: str, html: str, rep: Report) -> None:
-    """A city page should name its own city, state, or abbreviation — not a different place."""
+    """A city page should name its own city, state, or abbreviation, not a different place."""
     slug = url.rstrip("/").rsplit("/locations/", 1)[-1]
-    if slug not in CITY_STATE:          # only the city pages; state pages are handled elsewhere
+    city = _place(slug)
+    if city in STATE_SLUGS:              # state pages are covered by check_location_text
         return
-    allowed = {slug.replace("-", " "), CITY_STATE[slug]}
-    allowed |= set(CITY_ALIASES.get(slug, []))
-    allowed = {a.lower() for a in allowed}
-    wrong = sorted({n.strip() for n in PROVIDERS_IN.findall(html) if n.strip().lower() not in allowed})
+    allowed = {city} | {a.lower() for a in CITY_ALIASES.get(slug, [])}
+    if slug in CITY_STATE:
+        allowed.add(CITY_STATE[slug].lower())
+    else:
+        # Unknown city: we don't know its state, so accept any state name and ask for an entry.
+        allowed |= STATE_SLUGS
+        rep.warn(f"{url}: city not in CITY_STATE; add it so the check knows its state")
+    named = {_place(n) for n in PROVIDERS_IN.findall(ABBREV.sub(r"\1", html))}
+    wrong = sorted(n.title() for n in named if n not in allowed)
     if wrong:
         pretty = slug.replace("-", " ").title()
         rep.fail(f"{url} (page for {pretty}) says providers are in {', '.join(wrong)}")

@@ -6,7 +6,7 @@ Get Started page sent patients into **Michigan's** booking flow — the dropdown
 
 **What this does.** In about a minute it checks the state and insurance dropdowns, every page
 in the sitemap, and the licensing and city text on each location page, and it exits non-zero
-(fails loudly) the moment any of it is wrong. Nothing to install beyond Python; it's read-only
+(fails loudly) the moment any of it is wrong. It needs only Python and `requests`; it's read-only
 and never touches the booking system unless you explicitly opt in.
 
 **Run on Nov 14, 2026, it flagged 4 pages that give patients the wrong location:**
@@ -26,7 +26,7 @@ reported, so the live site may already differ.)
 | Insurance dropdown | an insurer is listed twice or has an empty value |
 | Sitemap | any page in `sitemap.xml` doesn't return 200. Pages without a canonical link are warnings. |
 | Licensing text | a location page tells patients their provider (licensed in one state) can see them only in a different state |
-| City text | a city page says its providers are in a different city (e.g. the Pittsburgh page naming Philadelphia) |
+| City text | a city page says its providers are in a different place than its own city or state (e.g. the Pittsburgh page naming Philadelphia). City pages missing from `CITY_STATE` are warnings. |
 | Booking flow (`--booking`, optional) | a served state doesn't open on scheduling, or a state Blossom doesn't serve shows appointment times |
 
 It reads the live dropdown lists straight from the JavaScript the Get Started page ships with,
