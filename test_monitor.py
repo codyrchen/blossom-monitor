@@ -100,3 +100,18 @@ def test_city_check_covers_unlisted_cities():
     rep = Report()
     check_city_text("/locations/washington-dc", "providers in Washington D.C. who", rep)
     assert rep.failures == [] and rep.warnings == []        # a state-level page, skipped
+
+
+def test_unreachable_site_reports_failure_instead_of_crashing(monkeypatch, capsys):
+    import sys
+    import requests
+    import monitor
+
+    def down(url, **kw):
+        raise requests.ConnectionError("site down")
+
+    monkeypatch.setattr(monitor, "get", down)
+    monkeypatch.setattr(sys, "argv", ["monitor.py"])
+    assert monitor.main() == 1
+    out = capsys.readouterr().out
+    assert "Could not load" in out and "2 failures" in out

@@ -12,11 +12,12 @@ and never touches the booking system unless you explicitly opt in.
 **Run on Nov 14, 2026, it flagged 4 pages that give patients the wrong location:**
 
 - **Connecticut, Orlando, and Tampa** tell patients their provider "can only provide care when
-  you're physically located in **New York**" — the same licensing risk as the Mississippi bug.
+  you're physically located in **New York**", the same licensing risk as the Mississippi bug.
 - **Pittsburgh** says its providers are in **Philadelphia**.
 
-(Re-run before relying on these — Blossom fixed the Mississippi bug within hours of it being
-reported, so the live site may already differ.)
+Everything else passed: all 51 state options map to the right code (the Mississippi fix is
+live), the 9 insurance options have no duplicates, and all 580 sitemap pages return 200 with a
+canonical link. Re-run before relying on these, since the live site may have changed.
 
 ## What it checks
 

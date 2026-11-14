@@ -185,13 +185,15 @@ def _place(name: str) -> str:
 
 
 STATE_SLUGS = {_place(name) for name in USPS} | {"washington dc"}
+# /locations/ pages that aren't about a place
+NOT_PLACES = {"online-psychiatrist"}
 
 
 def check_city_text(url: str, html: str, rep: Report) -> None:
     """A city page should name its own city, state, or abbreviation, not a different place."""
     slug = url.rstrip("/").rsplit("/locations/", 1)[-1]
     city = _place(slug)
-    if city in STATE_SLUGS:              # state pages are covered by check_location_text
+    if city in STATE_SLUGS or slug in NOT_PLACES:   # state pages: see check_location_text
         return
     allowed = {city} | {a.lower() for a in CITY_ALIASES.get(slug, [])}
     if slug in CITY_STATE:
@@ -274,11 +276,18 @@ def main() -> int:
     args = ap.parse_args()
 
     rep = Report()
-    check_widget(rep)
-    urls = check_sitemap(rep)
+    try:
+        check_widget(rep)
+    except requests.RequestException as e:
+        rep.fail(f"Could not load {SITE}/start: {e}")
+    try:
+        urls = check_sitemap(rep)
+    except requests.RequestException as e:
+        rep.fail(f"Could not load {SITE}/sitemap.xml: {e}")
+        urls = []
     served = served_states(urls)
     rep.note(f"Served states (from /locations pages): {len(served)}: {', '.join(sorted(served))}")
-    if args.booking:
+    if args.booking and served:
         check_booking(served, rep)
 
     for label, items in (("FAIL", rep.failures), ("WARN", rep.warnings), ("INFO", rep.info)):
