@@ -49,14 +49,30 @@ def test_flags_wrong_state_licensing_faq():
     assert len(rep.failures) == 1 and "New York" in rep.failures[0]
 
 
-def test_flags_wrong_city():
+def test_city_check_flags_only_the_real_bug():
     from monitor import check_city_text
-    pitt = "Blossom connects you with licensed psychiatric providers in Philadelphia who offer care."
-    phil = "Blossom connects you with licensed psychiatric providers in Philadelphia who offer care."
+    tpl = "Blossom connects you with licensed psychiatric providers in {} who offer care."
+    cases = {
+        "pittsburgh": "Philadelphia",   # BUG: different city
+        "philadelphia": "Philadelphia", # own city
+        "orlando": "Florida",           # its state
+        "tampa": "Florida",             # its state
+        "boston": "Massachusetts",      # its state
+        "new-york-city": "New York",    # its state (NY)
+        "los-angeles": "LA",            # abbreviation
+        "san-francisco": "SF",          # abbreviation
+    }
     rep = Report()
-    check_city_text("/locations/pittsburgh", pitt, rep)   # should fail: page is Pittsburgh, text says Philadelphia
-    check_city_text("/locations/philadelphia", phil, rep)  # should pass
+    for slug, named in cases.items():
+        check_city_text(f"/locations/{slug}", tpl.format(named), rep)
     assert len(rep.failures) == 1 and "Pittsburgh" in rep.failures[0]
+
+
+def test_city_check_ignores_state_pages():
+    from monitor import check_city_text
+    rep = Report()
+    check_city_text("/locations/texas", "providers in Dallas who offer care", rep)
+    assert rep.failures == []
 
 
 def test_duplicate_insurance():

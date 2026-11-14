@@ -159,21 +159,37 @@ def check_location_text(url: str, html: str, rep: Report) -> None:
             rep.fail(f"{url} says your {licensed}-licensed provider can see you only in {located}")
 
 
-PROVIDERS_IN = re.compile(r"providers in ([A-Z][A-Za-z.\- ]+?)(?: who| near|,|\.)")
-# City slugs whose display name isn't a plain title-case of the slug
-CITY_DISPLAY = {"new-york-city": "New York", "los-angeles": "Los Angeles",
-                "san-antonio": "San Antonio", "san-diego": "San Diego",
-                "san-francisco": "San Francisco"}
+PROVIDERS_IN = re.compile(r"providers in ([A-Z][A-Za-z.\- ]+?)(?: who| near|,|\.| area)")
+
+# City pages and the state each is in. A city page legitimately names its own city, its
+# state, or a common abbreviation of the city — so the allow-list is all three. It's only a
+# bug when the page names some OTHER place (Pittsburgh's page naming Philadelphia).
+CITY_STATE = {
+    "philadelphia": "Pennsylvania", "pittsburgh": "Pennsylvania", "nashville": "Tennessee",
+    "indianapolis": "Indiana", "boston": "Massachusetts", "denver": "Colorado",
+    "atlanta": "Georgia", "new-york-city": "New York", "tampa": "Florida", "orlando": "Florida",
+    "chicago": "Illinois", "miami": "Florida", "phoenix": "Arizona", "cincinnati": "Ohio",
+    "columbus": "Ohio", "houston": "Texas", "san-antonio": "Texas", "dallas": "Texas",
+    "austin": "Texas", "los-angeles": "California", "san-diego": "California",
+    "san-francisco": "California", "seattle": "Washington",
+}
+CITY_ALIASES = {
+    "los-angeles": ["LA"], "san-francisco": ["SF"], "new-york-city": ["NYC"],
+}
 
 
 def check_city_text(url: str, html: str, rep: Report) -> None:
-    """A city page should name its own city, not a different one (Pittsburgh said 'Philadelphia')."""
+    """A city page should name its own city, state, or abbreviation — not a different place."""
     slug = url.rstrip("/").rsplit("/locations/", 1)[-1]
-    expected = CITY_DISPLAY.get(slug, slug.replace("-", " ").title())
-    named = {m.strip() for m in PROVIDERS_IN.findall(html)}
-    wrong = [n for n in named if n.lower() != expected.lower()]
+    if slug not in CITY_STATE:          # only the city pages; state pages are handled elsewhere
+        return
+    allowed = {slug.replace("-", " "), CITY_STATE[slug]}
+    allowed |= set(CITY_ALIASES.get(slug, []))
+    allowed = {a.lower() for a in allowed}
+    wrong = sorted({n.strip() for n in PROVIDERS_IN.findall(html) if n.strip().lower() not in allowed})
     if wrong:
-        rep.fail(f"{url} (page for {expected}) says providers are in {', '.join(wrong)}")
+        pretty = slug.replace("-", " ").title()
+        rep.fail(f"{url} (page for {pretty}) says providers are in {', '.join(wrong)}")
 
 
 def check_sitemap(rep: Report, workers: int = 8) -> list[str]:

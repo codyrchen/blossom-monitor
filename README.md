@@ -1,8 +1,22 @@
 # Blossom site monitor
 
-A small, read-only check that would have caught the November 2026 bug where choosing
-**Mississippi** on Blossom's Get Started page sent patients into the **Michigan** booking flow
-(the dropdown mapped `Mississippi` to `MI`, and Arkansas was missing).
+**The problem it guards against.** In November 2026, choosing **Mississippi** on Blossom's
+Get Started page sent patients into **Michigan's** booking flow — the dropdown mapped
+`Mississippi` to `MI`. A patient could have booked a provider not licensed in their state.
+
+**What this does.** In about a minute it checks the state and insurance dropdowns, every page
+in the sitemap, and the licensing and city text on each location page, and it exits non-zero
+(fails loudly) the moment any of it is wrong. Nothing to install beyond Python; it's read-only
+and never touches the booking system unless you explicitly opt in.
+
+**Run on Nov 14, 2026, it flagged 4 pages that give patients the wrong location:**
+
+- **Connecticut, Orlando, and Tampa** tell patients their provider "can only provide care when
+  you're physically located in **New York**" — the same licensing risk as the Mississippi bug.
+- **Pittsburgh** says its providers are in **Philadelphia**.
+
+(Re-run before relying on these — Blossom fixed the Mississippi bug within hours of it being
+reported, so the live site may already differ.)
 
 ## What it checks
 
@@ -33,16 +47,6 @@ schedule. The included GitHub Action (`.github/workflows/monitor.yml`) is manual
 The `--booking` check opens Blossom's intake flow once per state, which starts a session in
 the intake tool each time, so it's off by default and meant to run only with Blossom's okay.
 
-## What a run covers
-
-- **State dropdown:** all options on `/start`, each checked against its USPS code (51 as of writing)
-- **Insurance dropdown:** the `/start` insurer options, checked for duplicates and empty values
-- **Sitemap:** every URL in `sitemap.xml` (~580) fetched and checked for a 200 and a canonical link
-- **Licensing + city text:** every `/locations/*` page checked that it names the right state and city
-
-Run `python monitor.py` and paste the summary line it prints (`N failures, N warnings`) here once
-you've seen it, rather than quoting a count you haven't run.
-
-The offline tests replay the November 2026 state list, so they fail loudly on the original
-Mississippi → MI mapping, the duplicate MI code, and the missing Arkansas, and on a location
-page that names the wrong state.
+The offline tests replay the November 2026 state list, so they fail on the original
+Mississippi → MI mapping, the duplicate MI code, the missing Arkansas, a location page that
+names the wrong state, and a city page (Pittsburgh) that names the wrong city.
